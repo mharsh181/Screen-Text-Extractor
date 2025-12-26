@@ -3,3 +3,5 @@ Pillow
 pyperclip
 pystray
 keyboard
+
+rapidocr_onnxruntime

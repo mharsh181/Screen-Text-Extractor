@@ -6,6 +6,7 @@ from PIL import Image, ImageDraw
 import pyperclip
 import sys
 import os
+import keyboard
 
 from snipper import SnippingTool
 from ocr_engine import extract_text, setup_tesseract
@@ -22,9 +23,10 @@ class TextExtractorApp:
         # Status variable
         self.tesseract_ready = setup_tesseract()
         if not self.tesseract_ready:
-            # print("Warning: Tesseract not found. OCR will fail until installed.")
-            pass
+            print("Warning: Tesseract not found. OCR will fail until installed.")
             # We can show a message box here, but let's do it on first snip to not block startup
+        
+        self.advanced_mode = False # Default to standard
             
         self.icon = None
         self.setup_tray()
@@ -35,14 +37,28 @@ class TextExtractorApp:
         d = ImageDraw.Draw(image)
         d.text((10,10), "OCR", fill=(255,255,0))
         
+        # Define menu with toggle
         menu = pystray.Menu(
             pystray.MenuItem("Snip Text from Screen", self.on_snip_request),
+            pystray.MenuItem("Enable Advanced Mode (High Accuracy / RapidOCR)", self.toggle_advanced, checked=lambda item: self.advanced_mode),
             pystray.MenuItem("Exit", self.on_exit)
         )
         
         self.icon = pystray.Icon("name", image, "Text Extractor", menu)
 
+    def toggle_advanced(self, icon, item):
+        self.advanced_mode = not self.advanced_mode
+        state = "Enabled" if self.advanced_mode else "Disabled"
+        self.icon.notify(f"Advanced Mode (RapidOCR) {state}", "Settings Updated")
+
     def run(self):
+        # Setup Global Hotkey
+        try:
+            keyboard.add_hotkey('ctrl+alt+s', lambda: self.root.after(0, self.start_snip_main_thread))
+            print("Shortcut registered: Ctrl+Alt+S")
+        except Exception as e:
+            print(f"Failed to register hotkey: {e}")
+
         # Run tray icon in a separate thread because Tkinter needs the main thread
         threading.Thread(target=self.icon.run, daemon=True).start()
         
@@ -57,7 +73,8 @@ class TextExtractorApp:
         self.root.after(0, self.start_snip_main_thread)
 
     def start_snip_main_thread(self):
-        if not self.tesseract_ready:
+        # Only check Tesseract if in Standard Mode
+        if not self.advanced_mode and not self.tesseract_ready:
             # Recheck just in case user installed it while app was running
             self.tesseract_ready = setup_tesseract()
             if not self.tesseract_ready:
@@ -70,10 +87,12 @@ class TextExtractorApp:
         # print("Image captured. Extracting text...")
         
         # Run OCR in a separate thread so UI doesn't freeze
-        threading.Thread(target=self.process_image, args=(image,), daemon=True).start()
+        mode = "advanced" if self.advanced_mode else "standard"
+        threading.Thread(target=self.process_image, args=(image, mode), daemon=True).start()
 
-    def process_image(self, image):
-        text = extract_text(image)
+    def process_image(self, image, mode):
+        text = extract_text(image, mode=mode)
+
         # print(f"Extracted: {text}")
         
         if text:
@@ -101,6 +120,8 @@ class TextExtractorApp:
     def on_exit(self, icon, item):
         self.icon.stop()
         self.root.quit()
+        # Force kill to ensure all threads (keyboard listener, etc.) die
+        os._exit(0)
 
 if __name__ == "__main__":
     app = TextExtractorApp()
